@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "https://esm.sh/react@18?dev";
 import { createRoot } from "https://esm.sh/react-dom@18/client?dev";
@@ -220,6 +221,68 @@ async function fetchProfile(accessToken) {
   return response.json();
 }
 
+async function fetchUserPlaylists(accessToken) {
+  const playlists = [];
+  let nextUrl = "https://api.spotify.com/v1/me/playlists?limit=50";
+
+  while (nextUrl) {
+    const response = await fetch(nextUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (response.status === 401) {
+      const error = new Error("Authorization expired");
+      error.status = 401;
+      throw error;
+    }
+
+    if (!response.ok) {
+      const detail = await safeParseJson(response);
+      const message = detail?.error?.message || "Unable to load playlists";
+      throw new Error(message);
+    }
+
+    const data = await response.json();
+    if (Array.isArray(data.items)) {
+      for (const item of data.items) {
+        playlists.push({
+          id: item.id,
+          name: item.name || "Untitled playlist",
+          trackCount: item.tracks?.total ?? 0,
+          ownerName: item.owner?.display_name || item.owner?.id || "Unknown",
+        });
+      }
+    }
+
+    nextUrl = data.next || null;
+  }
+
+  return playlists;
+}
+
+async function fetchPlaylistSummary(accessToken, playlistId) {
+  const response = await fetch(
+    `https://api.spotify.com/v1/playlists/${playlistId}?fields=name,tracks.total`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+
+  if (response.status === 401) {
+    const error = new Error("Authorization expired");
+    error.status = 401;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const detail = await safeParseJson(response);
+    const message = detail?.error?.message || "Unable to load playlist details";
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
 function useEnsureAccessToken(settings, token, setToken) {
   return useCallback(async () => {
     if (!token) return null;
@@ -277,6 +340,12 @@ function App() {
     () => ensureTrailingSlash(`${window.location.origin}${window.location.pathname}`),
     []
   );
+  const isMounted = useRef(true);
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
   const [settings, setSettings] = useSessionStorage(SETTINGS_KEY, null);
   const [token, setToken] = useSessionStorage(TOKEN_KEY, null);
   const [clientId, setClientId] = useState(() => settings?.clientId ?? "");
@@ -286,7 +355,11 @@ function App() {
   const [status, setStatus] = useState("");
   const [profile, setProfile] = useState(null);
   const [isClearing, setIsClearing] = useState(false);
+  const [playlists, setPlaylists] = useState([]);
+  const [playlistsState, setPlaylistsState] = useState("idle");
+  const [playlistsError, setPlaylistsError] = useState("");
   const { toasts, pushToast, dismissToast } = useToasts();
+  const numberFormatter = useMemo(() => new Intl.NumberFormat(), []);
 
   useEffect(() => {
     setClientId(settings?.clientId ?? "");
@@ -294,6 +367,150 @@ function App() {
   }, [settings, defaultRedirect]);
 
   const ensureAccessToken = useEnsureAccessToken(settings, token, setToken);
+
+  const loadPlaylists = useCallback(
+    async ({ skipToast = false } = {}) => {
+      if (!isMounted.current) {
+        return null;
+      }
+
+      if (!token) {
+        if (isMounted.current) {
+          setPlaylists([]);
+          setPlaylistsState("idle");
+          setPlaylistsError("");
+        }
+        return null;
+      }
+
+      if (isMounted.current) {
+        setPlaylistsState("loading");
+        setPlaylistsError("");
+      }
+
+      const activeToken = await ensureAccessToken();
+      if (!activeToken) {
+        const message = "Session expired. Please sign in again.";
+        if (!skipToast) {
+          pushToast(message);
+        }
+        if (isMounted.current) {
+          setPlaylists([]);
+          setPlaylistsState("error");
+          setPlaylistsError(message);
+          setProfile(null);
+          setToken(null);
+        }
+        return null;
+      }
+
+      try {
+        const fetched = await fetchUserPlaylists(activeToken.accessToken);
+        if (!isMounted.current) {
+          return fetched;
+        }
+        setPlaylists(fetched);
+        setPlaylistsState("success");
+        setPlaylistsError("");
+        return fetched;
+      } catch (error) {
+        console.error(error);
+        const message =
+          error.status === 401
+            ? "Authorization expired. Sign in again."
+            : error.message || "Unable to load playlists.";
+        if (!skipToast) {
+          pushToast(message);
+        }
+        if (isMounted.current) {
+          if (error.status === 401) {
+            setToken(null);
+            setProfile(null);
+          }
+          setPlaylistsState("error");
+          setPlaylistsError(message);
+        }
+        return null;
+      }
+    },
+    [ensureAccessToken, isMounted, pushToast, setProfile, setToken, token]
+  );
+
+  const isAuthenticated = Boolean(token);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setPlaylists([]);
+      setPlaylistsState("idle");
+      setPlaylistsError("");
+      return;
+    }
+
+    loadPlaylists();
+  }, [isAuthenticated, loadPlaylists]);
+
+  const handleRefreshPlaylists = useCallback(() => {
+    loadPlaylists();
+  }, [loadPlaylists]);
+
+  const formatTrackCount = useCallback(
+    (count) => {
+      if (count === 1) {
+        return "1 track";
+      }
+      return `${numberFormatter.format(Math.max(count, 0))} tracks`;
+    },
+    [numberFormatter]
+  );
+
+  const selectedPlaylistId = useMemo(
+    () => parsePlaylistId(playlistValue.trim()),
+    [playlistValue]
+  );
+
+  const sortedPlaylists = useMemo(() => {
+    return [...playlists].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+  }, [playlists]);
+
+  const selectedPlaylist = useMemo(
+    () => playlists.find((playlist) => playlist.id === selectedPlaylistId) ?? null,
+    [playlists, selectedPlaylistId]
+  );
+
+  const playlistStatus = useMemo(() => {
+    if (playlistsState === "loading") {
+      return { message: "Loading playlists…", tone: "info" };
+    }
+
+    if (playlistsState === "error") {
+      return {
+        message: playlistsError || "Unable to load playlists.",
+        tone: "error",
+      };
+    }
+
+    if (playlistsState === "idle") {
+      return { message: "Select a playlist or paste a URL below.", tone: "info" };
+    }
+
+    if (!playlists.length) {
+      return {
+        message: "No editable playlists found yet. Try refreshing if you recently created one.",
+        tone: "info",
+      };
+    }
+
+    if (selectedPlaylist) {
+      const trackLabel = formatTrackCount(selectedPlaylist.trackCount);
+      return {
+        message: `"${selectedPlaylist.name}" currently has ${trackLabel}.`,
+        tone: "info",
+      };
+    }
+    return { message: "Select a playlist or paste a URL below.", tone: "info" };
+  }, [formatTrackCount, playlists, playlistsError, playlistsState, selectedPlaylist]);
 
   useEffect(() => {
     if (!token) {
@@ -441,7 +658,7 @@ function App() {
       }
 
       setIsClearing(true);
-      setStatus("Clearing playlist…");
+      setStatus("Preparing playlist details…");
 
       const activeToken = await ensureAccessToken();
       if (!activeToken) {
@@ -454,6 +671,23 @@ function App() {
       }
 
       try {
+        const summary = await fetchPlaylistSummary(activeToken.accessToken, playlistId);
+        const trackCount = summary?.tracks?.total ?? 0;
+        const playlistName = summary?.name?.trim() || "this playlist";
+        const trackLabel = formatTrackCount(trackCount);
+        const confirmed = window.confirm(
+          trackCount === 0
+            ? `"${playlistName}" already appears empty. Clear it anyway?`
+            : `Are you sure you want to remove all ${trackLabel} from "${playlistName}"? This cannot be undone.`
+        );
+
+        if (!confirmed) {
+          setStatus("Clearing cancelled.");
+          return;
+        }
+
+        setStatus("Clearing playlist…");
+
         const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
           method: "PUT",
           headers: {
@@ -477,22 +711,38 @@ function App() {
           throw new Error(detail?.error?.message || "Spotify rejected the request.");
         }
 
-        setStatus("Playlist cleared successfully.");
+        setStatus(`Removed ${trackLabel} from "${playlistName}".`);
         setPlaylistValue("");
         pushToast("Playlist emptied.");
+        await loadPlaylists({ skipToast: true });
       } catch (error) {
         console.error(error);
-        const message = error.message || "Unable to clear playlist.";
+        const message =
+          error.status === 401
+            ? "Authorization expired. Sign in again."
+            : error.message || "Unable to clear playlist.";
+        if (error.status === 401) {
+          setToken(null);
+          setProfile(null);
+        }
         setStatus(message);
         pushToast(message);
       } finally {
         setIsClearing(false);
       }
     },
-    [ensureAccessToken, playlistValue, pushToast, setPlaylistValue, setProfile, setToken]
+    [
+      ensureAccessToken,
+      loadPlaylists,
+      formatTrackCount,
+      playlistValue,
+      pushToast,
+      setPlaylistValue,
+      setProfile,
+      setToken,
+    ]
   );
 
-  const isAuthenticated = Boolean(token);
   const authorizeDisabled = !clientId.trim() || !redirectUri.trim() || authorizeState === "loading";
   const authorizeLabel = authorizeState === "loading" ? "Opening Spotify…" : "Sign in with Spotify";
   const userDisplay = profile?.display_name ?? profile?.id ?? "Loading profile…";
@@ -630,6 +880,54 @@ function App() {
               React.createElement(
                 "label",
                 { className: "field" },
+                React.createElement("span", null, "Choose a playlist"),
+                React.createElement(
+                  "select",
+                  {
+                    id: "playlistSelect",
+                    name: "playlistSelect",
+                    className: "select",
+                    value: selectedPlaylistId ?? "",
+                    disabled: playlistsState === "loading",
+                    onChange: (event) => setPlaylistValue(event.target.value),
+                  },
+                  React.createElement(
+                    "option",
+                    { value: "" },
+                    playlistsState === "loading" ? "Loading playlists…" : "Select a playlist"
+                  ),
+                  sortedPlaylists.map((playlist) =>
+                    React.createElement(
+                      "option",
+                      { key: playlist.id, value: playlist.id },
+                      `${playlist.name} • ${formatTrackCount(playlist.trackCount)} • ${playlist.ownerName}`
+                    )
+                  )
+                ),
+                playlistStatus.message &&
+                  React.createElement(
+                    "p",
+                    {
+                      className: `helper-text${
+                        playlistStatus.tone === "error" ? " helper-text-error" : ""
+                      }`,
+                    },
+                    playlistStatus.message
+                  )
+              ),
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "ghost refresh-button",
+                  onClick: handleRefreshPlaylists,
+                  disabled: playlistsState === "loading",
+                },
+                playlistsState === "loading" ? "Refreshing…" : "Refresh list"
+              ),
+              React.createElement(
+                "label",
+                { className: "field" },
                 React.createElement("span", null, "Playlist URL or ID"),
                 React.createElement("input", {
                   id: "playlistInput",
@@ -640,7 +938,12 @@ function App() {
                   spellCheck: "false",
                   value: playlistValue,
                   onChange: (event) => setPlaylistValue(event.target.value),
-                })
+                }),
+                React.createElement(
+                  "p",
+                  { className: "helper-text" },
+                  "Selecting from the list fills this field automatically."
+                )
               ),
               React.createElement(
                 "button",
