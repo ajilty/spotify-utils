@@ -1,0 +1,135 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(160deg, #0c111b 0%, #101d2f 60%, #1b1b1b 100%);
+  color: #f5f7fb;
+}
+
+#root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 3rem 1.5rem 1rem;
+  text-align: center;
+}
+
+h1 {
+  font-size: clamp(2.5rem, 5vw, 3.5rem);
+  margin: 0 0 0.5rem;
+}
+
+p.lead {
+  margin: 0 auto;
+  max-width: 48rem;
+  font-size: 1.125rem;
+  color: rgba(245, 247, 251, 0.8);
+}
+
+main {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.card-grid {
+  width: min(64rem, 100%);
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 18px;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.32);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card:hover,
+.card:focus-within {
+  transform: translateY(-6px);
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.45);
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.card p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+}
+
+.status-chip svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.status-chip.complete {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+}
+
+.status-chip.planned {
+  background: rgba(234, 179, 8, 0.2);
+  color: #facc15;
+}
+
+.card a {
+  margin-top: auto;
+  align-self: flex-start;
+  text-decoration: none;
+  font-weight: 600;
+  color: #60a5fa;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+footer {
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+@media (max-width: 600px) {
+  header {
+    padding-top: 2.5rem;
+  }
+
+  .card {
+    padding: 1.5rem;
+  }
+}
