@@ -11,7 +11,12 @@ import { createPortal } from "https://esm.sh/react-dom@18?dev";
 const SETTINGS_KEY = "su_playlist_cleaner_settings";
 const TOKEN_KEY = "su_playlist_cleaner_token";
 const PKCE_KEY = "su_playlist_cleaner_pkce";
-const REQUIRED_SCOPES = ["playlist-modify-public", "playlist-modify-private"];
+const REQUIRED_SCOPES = [
+  "playlist-modify-public",
+  "playlist-modify-private",
+  "playlist-read-private",
+  "playlist-read-collaborative",
+];
 
 function useSessionStorage(key, initialValue = null) {
   const readValue = () => {
@@ -534,7 +539,9 @@ function App() {
         if (cancelled) return;
         setProfile(profileData);
         if (!hasRequiredScopes(freshToken.scope)) {
-          pushToast("Missing scopes. Re-authorize with playlist modify permissions.");
+          pushToast(
+            "Missing scopes. Re-authorize with playlist read and modify permissions."
+          );
         }
       } catch (error) {
         console.error(error);
